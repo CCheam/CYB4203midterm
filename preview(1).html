@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SEETAC Targeting System Simulator</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #050a05; color: #33ff33; padding: 20px; }
+        .container { max-width: 1100px; margin: auto; border: 2px solid #33ff33; padding: 30px; border-radius: 8px; box-shadow: 0 0 20px rgba(51, 255, 51, 0.2); }
+        .grid { display: grid; grid-template-columns: 1.2fr 2fr; gap: 20px; }
+        
+        /* Map Styles */
+        .map-display { background: #000; height: 500px; border: 1px solid #33ff33; position: relative; overflow: hidden; background-image: radial-gradient(#111 1px, transparent 1px); background-size: 20px 20px; }
+        .target { position: absolute; border: 2px solid #00ff00; width: 60px; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; text-align: center; background: rgba(0, 255, 0, 0.05); cursor: grab; }
+        .target:active { cursor: grabbing; }
+        .hostile { border-color: #ff0000; color: #ff0000; font-weight: bold; background: rgba(255,0,0,0.1); z-index: 10; }
+        /* Prevent child elements from interfering with drag targeting */
+        .target span, .target b { pointer-events: none; }
+        
+        /* Control Panel Styles */
+        .controls { background: #111; padding: 20px; border: 1px solid #33ff33; display: flex; flex-direction: column; gap: 10px; }
+        button { width: 100%; padding: 12px; cursor: pointer; background: transparent; color: #33ff33; border: 1px solid #33ff33; font-weight: bold; transition: all 0.2s; }
+        button:hover { background: #33ff33; color: #000; }
+        
+        /* Drag & Drop Lifecycle Styles */
+        .payload-container { display: flex; gap: 8px; margin-bottom: 10px; }
+        .payload { flex: 1; background: #222; border: 1px dashed #ffaa00; color: #ffaa00; padding: 8px 4px; text-align: center; cursor: grab; font-weight: bold; font-size: 10px; }
+        .payload:active { cursor: grabbing; }
+        
+        .lifecycle-container { display: flex; flex-direction: column; gap: 8px; }
+        .lifecycle-stage { border: 2px dashed #444; padding: 15px 10px; text-align: center; color: #888; transition: all 0.3s; font-size: 13px; display: flex; align-items: center; justify-content: center; background: #0a0a0a; flex-direction: column; }
+        .lifecycle-stage.drag-over { border-color: #ffaa00; background: rgba(255, 170, 0, 0.1); color: #ffaa00; }
+        .lifecycle-stage.compromised { border-style: solid; border-color: #ff0000; background: rgba(255, 0, 0, 0.2); color: #fff; font-weight: bold; }
+        .lifecycle-stage span { pointer-events: none; }
+        
+        /* Disabled Stage Styles */
+        .disabled-stage { border: 1px solid #222; background: #060606; color: #444; cursor: not-allowed; }
+        .disabled-subtext { font-size: 10px; color: #333; margin-top: 4px; font-weight: normal; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="text-align:center; text-transform:uppercase; letter-spacing: 2px;">SEETAC Targeting System</h2>
+    
+    <div class="grid">
+        <div class="controls">
+            <h4 style="margin-top:0; border-bottom: 1px solid #333; padding-bottom: 5px;">1. Select Attack Payload</h4>
+            
+            <div class="payload-container">
+                <div class="payload" draggable="true" ondragstart="dragPayload(event, 'poison')" title="Targets the Data Collection stage">
+                    Poisoned Data ☣️
+                </div>
+                <div class="payload" draggable="true" ondragstart="dragPayload(event, 'weight')" title="Targets the Training stage">
+                    Malicious Weights ⚖️
+                </div>
+                <div class="payload" draggable="true" ondragstart="dragPayload(event, 'adversarial')" title="Targets the Deployment stage">
+                    Adversarial Input 🎭
+                </div>
+            </div>
+
+            <h4 style="margin-top:5px; border-bottom: 1px solid #333; padding-bottom: 5px;">2. Inject into AI/ML Lifecycle</h4>
+            
+            <div class="lifecycle-container">
+                <div id="stage-data" class="lifecycle-stage" ondrop="dropPayload(event, 'data')" ondragover="allowDrop(event)" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)">
+                    <span>1. Data Collection Stage</span>
+                </div>
+                
+                <div id="stage-train" class="lifecycle-stage" ondrop="dropPayload(event, 'train')" ondragover="allowDrop(event)" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)">
+                    <span>2. Model Training Stage</span>
+                </div>
+
+                <div id="stage-deploy" class="lifecycle-stage" ondrop="dropPayload(event, 'deploy')" ondragover="allowDrop(event)" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)">
+                    <span>3. Deployment & Integration</span>
+                </div>
+
+                <div id="stage-monitor" class="lifecycle-stage disabled-stage" title="This stage is protected from these payloads.">
+                    <span>4. Monitoring & Maintenance 🔒</span>
+                    <span class="disabled-subtext">(Not directly attacked by these attack vectors)</span>
+                </div>
+            </div>
+            
+            <hr style="border:0; border-top:1px solid #333; margin: 15px 0;">
+            <button onclick="resetSystem()" style="background:#444; color:white; border:none;">RANDOMIZE & RESET SYSTEM</button>
+        </div>
+
+        <div class="map-display" id="map" ondrop="dropTarget(event)" ondragover="allowDrop(event)">
+            </div>
+    </div>
+</div>
+
+<script>
+    let targets = [];
+    let attackMode = 'none';
+    const mapWidth = 600; 
+    const mapHeight = 500;
+
+    const targetTemplates = [
+        { name: "Comm Tower", type: "Military", male: true, militant: true },
+        { name: "Ammo Dump", type: "Military", male: true, militant: true },
+        { name: "Urban Center", type: "Civilian", male: true, militant: false },
+        { name: "School", type: "Civilian", male: false, militant: false },
+        { name: "Hospital", type: "Civilian", male: true, militant: false },
+        { name: "Insurgent Base", type: "Military", male: true, militant: true },
+        { name: "Market", type: "Civilian", male: false, militant: false }
+    ];
+
+    // ==========================================
+    // DRAG AND DROP: MAP TARGETS
+    // ==========================================
+    function dragTarget(ev) {
+        const targetEl = ev.currentTarget;
+        ev.dataTransfer.setData("target_id", targetEl.id);
+        const rect = targetEl.getBoundingClientRect();
+        ev.dataTransfer.setData("offsetX", ev.clientX - rect.left);
+        ev.dataTransfer.setData("offsetY", ev.clientY - rect.top);
+    }
+
+    function dropTarget(ev) {
+        ev.preventDefault();
+        const targetId = ev.dataTransfer.getData("target_id");
+        if (!targetId || !targetId.startsWith('target-')) return; 
+
+        const draggedElement = document.getElementById(targetId);
+        if (!draggedElement) return;
+
+        const map = document.getElementById('map');
+        const mapRect = map.getBoundingClientRect();
+
+        const offsetX = parseInt(ev.dataTransfer.getData("offsetX"));
+        const offsetY = parseInt(ev.dataTransfer.getData("offsetY"));
+
+        let newX = ev.clientX - mapRect.left - offsetX;
+        let newY = ev.clientY - mapRect.top - offsetY;
+
+        newX = Math.max(0, Math.min(newX, mapRect.width - 60));
+        newY = Math.max(0, Math.min(newY, mapRect.height - 60));
+
+        // Update DOM element
+        draggedElement.style.left = newX + 'px';
+        draggedElement.style.top = newY + 'px';
+        
+        // Update the underlying data array so targets don't snap back on re-render
+        const targetIndex = parseInt(targetId.split('-')[1]);
+        if (!isNaN(targetIndex) && targets[targetIndex]) {
+            targets[targetIndex].x = newX;
+            targets[targetIndex].y = newY;
+        }
+    }
+
+    // ==========================================
+    // DRAG AND DROP: LIFECYCLE PAYLOADS
+    // ==========================================
+    function dragPayload(ev, attackType) {
+        ev.dataTransfer.setData("payload_type", attackType);
+    }
+
+    function dragEnter(ev) {
+        ev.preventDefault();
+        const targetElement = ev.currentTarget;
+        if (!targetElement.classList.contains('disabled-stage')) {
+            targetElement.classList.add('drag-over');
+        }
+    }
+
+    function dragLeave(ev) {
+        ev.currentTarget.classList.remove('drag-over');
+    }
+
+    function dropPayload(ev, stage) {
+        ev.preventDefault();
+        const targetElement = ev.currentTarget;
+        targetElement.classList.remove('drag-over');
+        
+        const attackType = ev.dataTransfer.getData("payload_type");
+        if (!attackType) return;
+
+        if (attackType === 'poison' && stage === 'data') {
+            targetElement.classList.add('compromised');
+            targetElement.innerHTML = "<span>1. DATA COLLECTION [COMPROMISED 🔒]</span>";
+            runAttack('poison');
+        } else if (attackType === 'weight' && stage === 'train') {
+            targetElement.classList.add('compromised');
+            targetElement.innerHTML = "<span>2. MODEL TRAINING [COMPROMISED 🔒]</span>";
+            runAttack('weight');
+        } else if (attackType === 'adversarial' && stage === 'deploy') {
+            targetElement.classList.add('compromised');
+            targetElement.innerHTML = "<span>3. DEPLOYMENT [COMPROMISED 🔒]</span>";
+            runAttack('adversarial');
+        } else if (stage === 'monitor') {
+            alert("Mismatch! The Monitoring stage is protected from these specific payloads.");
+        } else {
+            alert("Mismatch! In the AI lifecycle, this specific attack vector targets a different phase.");
+        }
+    }
+
+    function allowDrop(ev) {
+        ev.preventDefault();
+    }
+
+    // ==========================================
+    // SIMULATION LOGIC
+    // ==========================================
+    function generateTargets(count) {
+        targets = [];
+        
+        targets.push({
+            id: 0,
+            ...targetTemplates.find(t => t.name === "School"),
+            x: Math.floor(Math.random() * (mapWidth - 80)) + 10,
+            y: Math.floor(Math.random() * (mapHeight - 80)) + 10,
+            vulnerableToSpoofing: false
+        });
+
+        targets.push({
+            id: 1,
+            ...targetTemplates.find(t => t.name === "Comm Tower"),
+            x: Math.floor(Math.random() * (mapWidth - 80)) + 10,
+            y: Math.floor(Math.random() * (mapHeight - 80)) + 10,
+            vulnerableToSpoofing: true
+        });
+
+        targets.push({
+            id: 2,
+            ...targetTemplates.find(t => t.name === "Insurgent Base"),
+            x: Math.floor(Math.random() * (mapWidth - 80)) + 10,
+            y: Math.floor(Math.random() * (mapHeight - 80)) + 10,
+            vulnerableToSpoofing: false
+        });
+
+        // Add Market as a guaranteed spawn so you can test the new logic
+        targets.push({
+            id: 3,
+            ...targetTemplates.find(t => t.name === "Market"),
+            x: Math.floor(Math.random() * (mapWidth - 80)) + 10,
+            y: Math.floor(Math.random() * (mapHeight - 80)) + 10,
+            vulnerableToSpoofing: false
+        });
+
+        for (let i = 4; i < count; i++) {
+            const template = targetTemplates[Math.floor(Math.random() * targetTemplates.length)];
+            targets.push({
+                id: i,
+                name: template.name,
+                type: template.type,
+                male: template.male,
+                militant: template.militant,
+                x: Math.floor(Math.random() * (mapWidth - 80)) + 10,
+                y: Math.floor(Math.random() * (mapHeight - 80)) + 10,
+                vulnerableToSpoofing: Math.random() > 0.5 
+            });
+        }
+    }
+
+    function renderTargets() {
+        const map = document.getElementById('map');
+        map.innerHTML = '';
+        targets.forEach((t, index) => {
+            const el = document.createElement('div');
+            el.className = 'target';
+            el.id = 'target-' + index;
+            el.draggable = true;
+            el.ondragstart = dragTarget; 
+            
+            el.style.left = t.x + 'px';
+            el.style.top = t.y + 'px';
+            
+            let isHostile = t.militant;
+            let displayLabel = t.name;
+            
+            // Updated logic: Poisoning now affects both School and Market
+            if (attackMode === 'poison' && (t.name === "School" || t.name === "Market")) {
+                isHostile = true; 
+            } else if (attackMode === 'weight' && t.male) {
+                isHostile = true; 
+            } else if (attackMode === 'adversarial' && t.vulnerableToSpoofing) {
+                if (t.name === "Comm Tower") {
+                    isHostile = false; 
+                    displayLabel = "Spoofed Signal";
+                } else if (t.name === "Insurgent Base") {
+                    isHostile = false;
+                    displayLabel = "Civilian Village";
+                } else if (t.name === "Ammo Dump") {
+                    isHostile = false;
+                    displayLabel = "Warehouse";
+                }
+            }
+
+            if (isHostile) el.classList.add('hostile');
+            el.innerHTML = `<span>${displayLabel}</span><br><b>${isHostile ? 'HOSTILE' : 'NEUTRAL'}</b>`;
+            map.appendChild(el);
+        });
+    }
+
+    function runAttack(type) {
+        attackMode = type;
+        renderTargets();
+    }
+
+    function resetSystem() {
+        attackMode = 'none';
+        
+        // Reset Lifecycle UI
+        document.getElementById('stage-data').className = 'lifecycle-stage';
+        document.getElementById('stage-data').innerHTML = '<span>1. Data Collection Stage</span>';
+        
+        document.getElementById('stage-train').className = 'lifecycle-stage';
+        document.getElementById('stage-train').innerHTML = '<span>2. Model Training Stage</span>';
+
+        document.getElementById('stage-deploy').className = 'lifecycle-stage';
+        document.getElementById('stage-deploy').innerHTML = '<span>3. Deployment & Integration</span>';
+
+        generateTargets(10); 
+        renderTargets();
+    }
+
+    resetSystem();
+</script>
+</body>
+</html>
